@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RESCUE-X — Search & Rescue Rover Telemetry & Control Dashboard</title>
+  
+  <!-- Leaflet CSS for GPS Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <!-- Dashboard Tactical Stylesheet -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="app-viewport">
+    
+    <!-- HUD Header Navbar -->
+    <header class="hud-header">
+      <div class="brand-section">
+        <div class="brand-logo">🚨</div>
+        <div class="brand-title-wrap">
+          <h1>RESCUE-X</h1>
+          <p>SEARCH & RESCUE ROVER HUD</p>
+        </div>
+      </div>
+
+      <!-- Telemetry Status Bar -->
+      <div class="header-telemetry-bar">
+        <div class="status-badge">
+          <div class="status-dot" id="commsDot"></div>
+          <span>LINK:</span> <span class="val" id="commsText">Wi-Fi (94%)</span>
+        </div>
+
+        <div class="status-badge">
+          <span>ESP32:</span> <span class="val" style="color: var(--vital-green);">ONLINE</span>
+        </div>
+
+        <div class="status-badge">
+          <span>STM32:</span> <span class="val" style="color: var(--vital-green);">ONLINE</span>
+        </div>
+
+        <div class="status-badge">
+          <span>BATTERY:</span> <span class="val" id="headerBatteryVal">82% (12.4V)</span>
+        </div>
+
+        <div class="status-badge">
+          <span>MODE:</span> <span class="val" id="headerModeVal" style="color: var(--primary-cyan);">AUTONOMOUS</span>
+        </div>
+      </div>
+
+      <!-- Header Action Controls -->
+      <div class="header-actions">
+        <button class="btn-toggle-view" id="toggleViewBtn" onclick="toggleLayoutMode()">
+          <span id="viewIcon">📱</span> <span id="viewText">Phone Shell</span>
+        </button>
+        
+        <button class="btn-estop-header" onclick="triggerEmergencyStop()">
+          🛑 E-STOP
+        </button>
+      </div>
+    </header>
+
+    <!-- Telemetry Simulation Control Bar -->
+    <div class="sim-toolbar">
+      <span class="sim-label">⚡ SCENARIO SIMULATOR:</span>
+      <button class="sim-btn" id="simHumanBtn" onclick="simToggleHuman()">👤 Human Detected</button>
+      <button class="sim-btn" id="simGasBtn" onclick="simToggleGas()">☠️ Gas Leak Hazard</button>
+      <button class="sim-btn" id="simObstacleBtn" onclick="simToggleObstacle()">⚠️ Proximity Hazard</button>
+      <button class="sim-btn" id="simTiltBtn" onclick="simToggleTilt()">🧭 Rollover Alert</button>
+      <button class="sim-btn" id="simCommsBtn" onclick="simToggleComms()">📡 Comms Drop</button>
+      <button class="sim-btn" onclick="simResetAll()" style="color: var(--primary-cyan);">🔄 Reset Telemetry</button>
+    </div>
+
+    <!-- Main Container supporting both Phone Shell & Dashboard Layout Modes -->
+    <div class="view-container phone-mode-wrapper" id="viewWrapper">
+      
+      <main class="phone-shell" id="mainContainer">
+        <div class="phone-content" id="contentLayout">
+          
+          <!-- 1. LIVE CAMERA FEED (ESP32-CAM) -->
+          <section class="hud-card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>📷</span> LIVE CAMERA FEED (ESP32-CAM)
+              </div>
+              <span class="card-badge active" id="camStatusBadge">LIVE 30 FPS</span>
+            </div>
+            
+            <div class="camera-stream-wrap">
+              <canvas id="cameraCanvas" class="camera-canvas" width="640" height="360"></canvas>
+              <div class="camera-hud-overlay">
+                <div class="cam-tag"><div class="rec-dot"></div> REC • HD 1080</div>
+                <div class="cam-tag" id="camAiTag">AI DETECT: ACTIVE</div>
+              </div>
+            </div>
+
+            <div class="camera-controls">
+              <button class="cam-btn" onclick="toggleNightVision()">
+                👁️ <span id="nvLabel">Night Vision</span>
+              </button>
+              <button class="cam-btn" onclick="takeSnapshot()">
+                📸 Snapshot
+              </button>
+              <button class="cam-btn" onclick="toggleRecord()">
+                🔴 <span id="recLabel">Record</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- 2. LAPTOP AI HUMAN TRACKER & SPATIAL MAPPING -->
+          <section class="hud-card" style="border-color: var(--vital-green);">
+            <div class="card-header">
+              <div class="card-title" style="color: var(--vital-green);">
+                <span>📍</span> 2. LAPTOP AI HUMAN TRACKER & MAP
+              </div>
+              <span class="card-badge active" id="trackerStatusBadge">TARGET LOCKED</span>
+            </div>
+
+            <div class="vitals-stats-grid">
+              <div class="vital-stat-box">
+                <div class="vital-label">TARGET DISTANCE</div>
+                <div class="vital-val" id="trackerDistVal" style="color:var(--vital-green);">4.5 m</div>
+              </div>
+              <div class="vital-stat-box">
+                <div class="vital-label">BEARING ANGLE</div>
+                <div class="vital-val" id="trackerBearingVal" style="color:var(--primary-cyan);">45° NE</div>
+              </div>
+              <div class="vital-stat-box">
+                <div class="vital-label">RELATIVE OFFSET</div>
+                <div class="vital-val" id="trackerOffsetVal" style="color:var(--warning-amber); font-size:0.8rem;">X:2.4m | Y:3.8m</div>
+              </div>
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); display:flex; justify-content:space-between; margin-top:4px;">
+              <span>MAPPED GPS: <strong id="trackerGpsVal" style="color:#fff;">12.97164° N, 77.59463° E</strong></span>
+              <span>TRACK ID: <strong id="trackerIdVal" style="color:var(--primary-cyan);">#101</strong></span>
+            </div>
+          </section>
+
+          <!-- 3. VITAL-SIGN FEED (60-GHz mmWave Radar) -->
+          <section class="hud-card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>❤️</span> 3. VITAL-SIGN RADAR (60GHz mmWave)
+              </div>
+              <span class="card-badge active" id="vitalsBadge">PRESENCE CONFIRMED</span>
+            </div>
+
+            <div class="vitals-stats-grid">
+              <div class="vital-stat-box">
+                <div class="vital-label">HEART RATE</div>
+                <div class="vital-val" id="hrVal">78 <span style="font-size:0.65rem; font-weight:normal;">BPM</span></div>
+              </div>
+              <div class="vital-stat-box">
+                <div class="vital-label">BREATHING</div>
+                <div class="vital-val" id="rrVal">16 <span style="font-size:0.65rem; font-weight:normal;">BPM</span></div>
+              </div>
+              <div class="vital-stat-box">
+                <div class="vital-label">RADAR CONF</div>
+                <div class="vital-val" id="radarConfVal" style="color:var(--primary-cyan);">96%</div>
+              </div>
+            </div>
+
+            <div class="ecg-canvas-container">
+              <canvas id="ecgCanvas" width="400" height="90"></canvas>
+            </div>
+          </section>
+
+          <!-- 3. AUDIO FEED (Microphone Array) -->
+          <section class="hud-card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>🎤</span> AUDIO & SOUND DETECTOR
+              </div>
+              <span class="card-badge" id="audioBadge">MONITORING</span>
+            </div>
+
+            <div class="audio-meta">
+              <span>LEVEL: <strong id="soundLevelVal" style="color:#fff;">48 dB</strong></span>
+              <span>EVENT: <strong id="soundEventVal" style="color:var(--vital-green);">AMBIENT SAFE</strong></span>
+              <span>DIR: <strong id="soundDirVal" style="color:var(--primary-cyan);">45° NE</strong></span>
+            </div>
+
+            <div class="audio-canvas-wrap">
+              <canvas id="audioCanvas" width="400" height="80"></canvas>
+            </div>
+          </section>
+
+          <!-- 4. COMBINED HUMAN DETECTION ENGINE -->
+          <section class="hud-card" style="border-color: rgba(0, 255, 136, 0.3);">
+            <div class="card-header">
+              <div class="card-title" style="color: var(--vital-green);">
+                <span>👤</span> FUSED HUMAN DETECTION ENGINE
+              </div>
+              <span class="card-badge active" id="fusionStatusBadge">HUMAN DETECTED</span>
+            </div>
+
+            <div class="detection-matrix-box">
+              <div class="matrix-row">
+                <span>📷 ESP32-CAM Visual:</span>
+                <strong id="fusionCamText" style="color:var(--vital-green);">Detected</strong>
+              </div>
+              <div class="matrix-row">
+                <span>❤️ mmWave Radar Vitals:</span>
+                <strong id="fusionRadarText" style="color:var(--vital-green);">Present</strong>
+              </div>
+              <div class="matrix-row">
+                <span>🚶 PIR Motion Sensor:</span>
+                <strong id="fusionPirText" style="color:var(--vital-green);">Active Motion</strong>
+              </div>
+
+              <div style="margin-top: 4px;">
+                <div class="matrix-row">
+                  <span style="color:var(--text-muted); font-size:0.7rem;">FUSION CONFIDENCE SCORE</span>
+                  <span style="color:var(--vital-green); font-weight:700;" id="fusionScoreVal">94% (HIGH)</span>
+                </div>
+                <div class="confidence-bar-wrap">
+                  <div class="confidence-bar-fill" id="fusionBarFill" style="width: 94%;"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 5. HAZARD / GAS FEED (MQ-2 + MQ-135) -->
+          <section class="hud-card" id="gasCard">
+            <div class="card-header">
+              <div class="card-title">
+                <span>☠️</span> HAZARD & GAS FEED (MQ-2/135)
+              </div>
+              <span class="card-badge active" id="gasBadge">AIR QUALITY SAFE</span>
+            </div>
+
+            <div class="gas-danger-alert" id="gasAlertBanner" style="display: none;">
+              <span>⚠️ CRITICAL GAS LEAK HAZARD DETECTED!</span>
+            </div>
+
+            <div class="gas-grid">
+              <div class="sensor-box">
+                <div class="sensor-title">GAS LEVEL (PPM)</div>
+                <div class="sensor-value" id="gasPpmVal">142 <span style="font-size:0.7rem; color:var(--text-muted);">PPM</span></div>
+              </div>
+              <div class="sensor-box">
+                <div class="sensor-title">AIR QUALITY INDEX</div>
+                <div class="sensor-value" id="aqiVal" style="color:var(--vital-green);">GOOD (AQI 28)</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 6. ENVIRONMENT TELEMETRY (DS18B20) -->
+          <section class="hud-card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>🌡️</span> ENVIRONMENT TEMP (DS18B20)
+              </div>
+              <span class="card-badge active">NORMAL</span>
+            </div>
+
+            <div class="vitals-stats-grid">
+              <div class="vital-stat-box">
+                <div class="vital-label">AMBIENT TEMP</div>
+                <div class="vital-val" id="envTempVal" style="color:var(--primary-cyan);">31.2 °C</div>
+              </div>
+              <div class="vital-stat-box">
+                <div class="vital-label">TEMP STATUS</div>
+                <div class="vital-val" id="envTempStatus" style="color:var(--vital-green); font-size:0.85rem;">SAFE</div>
+              </div>
+              <div class="vital-stat-box">
+                <div class="vital-label">LIGHTING (LDR)</div>
+                <div class="vital-val" id="ldrVal" style="color:var(--warning-amber); font-size:0.95rem;">340 LUX</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 7. DISTANCE FEED (HC-SR04 x4 + ToF) -->
+          <section class="hud-card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>📏</span> 4-WAY PROXIMITY RADAR
+              </div>
+              <span class="card-badge active" id="distBadge">CLEAR PATH</span>
+            </div>
+
+            <div class="distance-matrix">
+              <div class="dist-card" id="distFrontCard">
+                <span>FRONT</span> <strong id="distFrontVal">82 cm</strong>
+              </div>
+              <div class="dist-card warning" id="distLeftCard">
+                <span>LEFT ⚠️</span> <strong id="distLeftVal">35 cm</strong>
+              </div>
+              <div class="dist-card" id="distRightCard">
+                <span>RIGHT</span> <strong id="distRightVal">120 cm</strong>
+              </div>
+              <div class="dist-card" id="distRearCard">
+                <span>REAR</span> <strong id="distRearVal">95 cm</strong>
+              </div>
+            </div>
+
+            <div class="radar-canvas-wrap">
+              <canvas id="radarCanvas" width="400" height="140"></canvas>
+            </div>
+          </section>
+
+          <!-- 8. ROVER ORIENTATION (MPU6050 6-Axis IMU) -->
+          <section class="hud-card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>🧭</span> ATTITUDE & ORIENTATION (MPU6050)
+              </div>
+              <span class="card-badge active" id="tiltBadge">STABLE</span>
+            </div>
+
+            <div class="horizon-canvas-wrap">
+              <canvas id="horizonCanvas" width="400" height="130"></canvas>
+            </div>
+
+            <div class="angle-stats">
+              <span>ROLL: <strong id="rollVal" style="color:#fff;">7°</strong></span>
+              <span>PITCH: <strong id="pitchVal" style="color:#fff;">3°</strong></span>
+              <span>YAW: <strong id="yawVal" style="color:var(--primary-cyan);">124°</strong></span>
+            </div>
+          </section>
+
+          <!-- 9. MOVEMENT & NAVIGATION STATUS -->
+          <section class="hud-card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>🛞</span> NAVIGATION & WHEEL ENCODERS
+              </div>
+              <span class="card-badge active">STM32 SYNCED</span>
+            </div>
+
+            <div class="vitals-stats-grid">
+              <div class="vital-stat-box">
+                <div class="vital-label">SPEED</div>
+                <div class="vital-val" id="speedVal">1.4 <span style="font-size:0.6rem;">m/s</span></div>
+              </div>
+              <div class="vital-stat-box">
+                <div class="vital-label">DISTANCE</div>
+                <div class="vital-val" id="odometerVal">12.4 <span style="font-size:0.6rem;">m</span></div>
+              </div>
+              <div class="vital-stat-box">
+                <div class="vital-label">HEADING</div>
+                <div class="vital-val" id="headingVal" style="color:var(--primary-cyan);">124° SE</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 10. GPS LOCATION & TACTICAL MAP -->
+          <section class="hud-card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>📍</span> GPS LIVE TRACKING MODULE
+              </div>
+              <span class="card-badge active">11 SATS LOCKED</span>
+            </div>
+
+            <div class="audio-meta" style="margin-bottom:6px;">
+              <span>LAT: <strong id="latVal">12.9716° N</strong></span>
+              <span>LON: <strong id="lonVal">77.5946° E</strong></span>
+            </div>
+
+            <div id="gpsMap" class="map-container"></div>
+          </section>
+
+          <!-- 11. ROVER DRIVE CONTROL PANEL (D-PAD & THROTTLE) -->
+          <section class="hud-card controls-card-wrapper">
+            <div class="card-header">
+              <div class="card-title" style="color: var(--primary-cyan);">
+                <span>🕹️</span> ROVER TELE-OPERATION CONTROLS
+              </div>
+              <span class="card-badge active" id="driveModeBadge">MANUAL READY</span>
+            </div>
+
+            <div class="dpad-container">
+              <div></div>
+              <button class="dpad-btn" id="btnFwd" onmousedown="sendDriveCmd('FORWARD')" onmouseup="sendDriveCmd('STOP')" ontouchstart="sendDriveCmd('FORWARD')" ontouchend="sendDriveCmd('STOP')">▲</button>
+              <div></div>
+
+              <button class="dpad-btn" id="btnLeft" onmousedown="sendDriveCmd('LEFT')" onmouseup="sendDriveCmd('STOP')" ontouchstart="sendDriveCmd('LEFT')" ontouchend="sendDriveCmd('STOP')">◀</button>
+              <button class="dpad-btn btn-stop" id="btnStop" onclick="sendDriveCmd('STOP')">STOP</button>
+              <button class="dpad-btn" id="btnRight" onmousedown="sendDriveCmd('RIGHT')" onmouseup="sendDriveCmd('STOP')" ontouchstart="sendDriveCmd('RIGHT')" ontouchend="sendDriveCmd('STOP')">▶</button>
+
+              <div></div>
+              <button class="dpad-btn" id="btnRev" onmousedown="sendDriveCmd('REVERSE')" onmouseup="sendDriveCmd('STOP')" ontouchstart="sendDriveCmd('REVERSE')" ontouchend="sendDriveCmd('STOP')">▼</button>
+              <div></div>
+            </div>
+
+            <div class="throttle-slider-wrap">
+              <span>SPEED:</span>
+              <input type="range" id="throttleSlider" class="throttle-slider" min="10" max="100" value="60" oninput="updateSpeedThrottle(this.value)">
+              <span id="throttleLabel" style="color:var(--primary-cyan); font-weight:bold;">60%</span>
+            </div>
+
+            <div class="camera-controls" style="margin-top: 12px;">
+              <button class="cam-btn" id="modeSwitchBtn" onclick="toggleDriveMode()">
+                🤖 <span id="driveModeBtnText">Switch to Autonomous</span>
+              </button>
+              <button class="cam-btn" id="headlightsBtn" onclick="toggleHeadlights()">
+                💡 Headlights: OFF
+              </button>
+              <button class="cam-btn" onclick="playHornSound()">
+                🔊 Horn Beacon
+              </button>
+            </div>
+          </section>
+
+          <!-- 12. CRITICAL EMERGENCY STOP BANNER -->
+          <button class="big-estop-banner" onclick="triggerEmergencyStop()">
+            🛑 EMERGENCY STOP
+          </button>
+
+        </div>
+      </main>
+    </div>
+
+  </div>
+
+  <!-- Leaflet JS for Maps -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <!-- Main Application JavaScript Logic -->
+  <script src="app.js"></script>
+</body>
+</html>
